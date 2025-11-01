@@ -3,6 +3,10 @@ export const config = {
   runtime: "nodejs" // ✅ CORS 가능한 Node 런타임 강제
 };
 
+import fetch from "node-fetch";
+global.fetch = fetch;
+
+
 import OpenAI from "openai";
 
 export default async function handler(req, res) {
