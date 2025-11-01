@@ -1,48 +1,33 @@
+// /api/load.js (진단용 임시버전)
 import fetch from "node-fetch";
 
-export const config = {
-  runtime: "nodejs"
-};
+export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
-  // ✅ CORS
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
   if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
     const { slug } =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    if (!slug) return res.status(400).json({ error: "slug 누락됨" });
+    const diag = {
+      receivedSlug: slug ?? null,
+      listCount: 0,
+      matchedSlug: null,
+      postQueryOk: false,
+      postQueryErrors: null,
+      notes: []
+    };
 
-    console.log("🔍 요청 slug:", slug);
-
-    // ✅ 1) 우선 slug 그대로 시도 (인코딩 X)
-    const query1 = `
-      query($slug: String!) {
-        post(username: "dvlp", url_slug: $slug) {
-          body
-        }
-      }
-    `;
-
-    let result = await fetch("https://v2.velog.io/graphql", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: query1, variables: { slug } })
-    });
-
-    let json = await result.json();
-    console.log("📦 1차 응답:", json);
-
-    if (json?.data?.post?.body) {
-      return res.status(200).json({ body: json.data.post.body });
+    if (!slug) {
+      return res.status(400).json({ body: "", diag: { ...diag, notes: ["slug missing in request body"] } });
     }
 
-    // ✅ 2) fallback: 전체 글 목록에서 **부분 일치 slug 탐색**
+    // 1) Velog 목록
     const listQuery = `
       query {
         posts(username: "dvlp") {
@@ -51,47 +36,51 @@ export default async function handler(req, res) {
         }
       }
     `;
-
-    let listRes = await fetch("https://v2.velog.io/graphql", {
+    const listRes = await fetch("https://v2.velog.io/graphql", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: listQuery })
     });
+    const listJson = await listRes.json();
+    const posts = listJson?.data?.posts || [];
+    diag.listCount = posts.length;
+    if (!posts.length) diag.notes.push("No posts returned from Velog");
 
-    let listJson = await listRes.json();
-    console.log("📦 게시글 목록:", listJson);
+    // 2) 매칭
+    const match =
+      posts.find(p => p.url_slug === slug) ||
+      posts.find(p => slug.includes(p.url_slug)) ||
+      posts.find(p => p.url_slug.includes(slug));
+    if (!match) {
+      diag.notes.push("No matching slug in posts list");
+      return res.status(200).json({ body: "", diag });
+    }
+    diag.matchedSlug = match.url_slug;
 
-    const posts = listJson.data?.posts || [];
-    const match = posts.find(p =>
-      slug.replace(/\s+/g, "").includes(p.url_slug.replace(/\s+/g, "")) ||
-      p.url_slug.replace(/\s+/g, "").includes(slug.replace(/\s+/g, ""))
-    );
-
-    if (!match) return res.status(200).json({ body: "" });
-
-    console.log("✅ fallback slug:", match.url_slug);
-
-    // ✅ 3) fallback slug 다시 본문 요청
-    const query2 = `
+    // 3) 본문 조회
+    const postQuery = `
       query($slug: String!) {
         post(username: "dvlp", url_slug: $slug) {
           body
         }
       }
     `;
-
-    let retryRes = await fetch("https://v2.velog.io/graphql", {
+    const postRes = await fetch("https://v2.velog.io/graphql", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: query2, variables: { slug: match.url_slug } })
+      body: JSON.stringify({ query: postQuery, variables: { slug: match.url_slug } })
     });
+    const postJson = await postRes.json();
 
-    let retryJson = await retryRes.json();
+    if (postJson?.errors) {
+      diag.postQueryErrors = postJson.errors;
+    }
 
-    return res.status(200).json({ body: retryJson?.data?.post?.body || "" });
+    const body = postJson?.data?.post?.body || "";
+    diag.postQueryOk = !!body;
 
+    return res.status(200).json({ body, diag });
   } catch (err) {
-    console.log("❌ load.js ERROR:", err);
-    return res.status(500).json({ error: "본문 로딩 실패" });
+    return res.status(500).json({ body: "", diag: { caughtError: String(err) } });
   }
 }
