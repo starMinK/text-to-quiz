@@ -1,19 +1,21 @@
 // api/generate.js
+export const runtime = "nodejs"; // ✅ Edge가 아니라 Node로 실행 강제
+
 import OpenAI from "openai";
 
 export default async function handler(req, res) {
 
-  // ✅ Preflight 요청 즉시 200으로 응답
+  // ✅ Preflight 먼저 처리
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     return res.status(200).end();
   }
 
-  // ✅ 모든 다른 요청에도 CORS 허용
+  // ✅ CORS for normal requests
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   try {
